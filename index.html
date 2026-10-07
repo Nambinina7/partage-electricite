@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Partage électricité</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Atkinson+Hyperlegible:wght@400;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="brand">
+      <div class="bolt" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M13 2 4 14h7l-1 8 9-12h-7l1-8z" fill="#1B1F2E"/></svg></div>
+      <div>
+        <h1>Partage électricité</h1>
+        <p class="sync" id="syncState">Enregistré sur cet appareil</p>
+      </div>
+    </div>
+    <nav class="tabs" role="tablist">
+      <button role="tab" data-view="entry" aria-selected="true">Saisie</button>
+      <button role="tab" data-view="results" aria-selected="false">Résultats</button>
+      <button role="tab" data-view="history" aria-selected="false">Historique</button>
+    </nav>
+  </header>
+
+  <!-- SAISIE -->
+  <section class="view active" id="view-entry">
+    <div class="panel">
+      <h2>Relevés du mois</h2>
+      <p class="hint" id="entryHint">Les relevés de début sont repris automatiquement depuis la fin du mois précédent.</p>
+      <div style="max-width:220px;margin-bottom:20px">
+        <label for="month">Mois</label>
+        <input type="month" id="month">
+      </div>
+      <div class="meters" id="meters"></div>
+    </div>
+
+    <div class="panel">
+      <h2>Facture</h2>
+      <p class="hint">Montant et kWh tels qu'indiqués sur la facture d'électricité.</p>
+      <div class="grid2">
+        <div><label for="billAmount">Montant total (Ar)</label><input type="text" inputmode="decimal" id="billAmount" autocomplete="off"></div>
+        <div><label for="billKwh">kWh facturés</label><input type="text" inputmode="decimal" id="billKwh" autocomplete="off"></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Écart compteur principal</h2>
+      <p class="hint">Différence entre le compteur principal et la somme des sous-compteurs. Par défaut, elle est attribuée à Nambinina.</p>
+      <div class="seg" role="radiogroup" aria-label="Répartition de l'écart">
+        <label><input type="radio" name="method" value="nambinina" checked>Attribuer à Nambinina</label>
+        <label><input type="radio" name="method" value="prop">Au prorata de la consommation</label>
+        <label><input type="radio" name="method" value="equal">À parts égales</label>
+        <label><input type="radio" name="method" value="none">Ne pas répartir</label>
+      </div>
+      <label class="check"><input type="checkbox" id="balance" checked>
+        <span>Ajuster pour que la somme des parts corresponde exactement au montant de la facture</span></label>
+    </div>
+
+    <div class="actions">
+      <button class="btn primary" id="saveBtn">Calculer et enregistrer</button>
+      <button class="btn danger" id="deleteBtn" hidden>Supprimer ce mois</button>
+      <p class="errors" id="errors" role="alert"></p>
+    </div>
+  </section>
+
+  <!-- RÉSULTATS -->
+  <section class="view" id="view-results">
+    <div class="panel" id="resultsPanel"></div>
+  </section>
+
+  <!-- HISTORIQUE -->
+  <section class="view" id="view-history">
+    <div class="panel" id="historyPanel"></div>
+  </section>
+</div>
+<div class="toast" id="toast" role="status"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
