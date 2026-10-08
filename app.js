@@ -3,8 +3,6 @@
 const PEOPLE = ["Fifaliana","Fara","Fleure","Rajo","Nambinina"];
 const COLORS = ["var(--p1)","var(--p2)","var(--p3)","var(--p4)","var(--p5)"];
 const LS_KEY = "partage-elec-mois-v1";
-// Transfert mensuel fixe (en Ar), converti en kWh au prix appliqué du mois
-const TRANSFERS = {Fifaliana:-15000, Rajo:10000, Fara:5000};
 const METHOD_LABEL = {nambinina:"attribué à Nambinina", prop:"au prorata", equal:"à parts égales", none:"non réparti"};
 
 const fmtKwh = new Intl.NumberFormat("fr-FR",{maximumFractionDigits:2});
@@ -20,7 +18,7 @@ function monthLabel(id){
 }
 function parseNum(v){
   if (v === null || v === undefined) return NaN;
-  const s = String(v).replace(/\s|\u00a0|\u202f/g,"").replace(",",".");
+  const s = String(v).replace(/\s|\u00a0|\u202f/g,"").replace(",",".").replace(/[\u2212\u2013]/g,"-");
   if (s === "") return NaN;
   return Number(s);
 }
@@ -69,8 +67,9 @@ function compute(m){
     price = m.bill.amount / kwhTotal;
     target = m.bill.amount;
   }
-  // Transfert : kWh équivalents à 15 000 Ar retirés à Fifaliana, ajoutés à Rajo (10 000) et Fara (5 000)
-  if (price > 0) PEOPLE.forEach((p,i) => { if (TRANSFERS[p]) kwh[i] += TRANSFERS[p] / price; });
+  // Ajustements du mois (Ar) convertis en kWh au prix appliqué
+  const adj = m.adjust || {};
+  if (price > 0) PEOPLE.forEach((p,i) => { if (adj[p]) kwh[i] += adj[p] / price; });
   const raw = kwh.map(k => k*price);
   // Arrondi à l'ariary, en gardant un total exact (méthode du plus grand reste)
   if (target === undefined) target = raw.reduce((a,b)=>a+b,0);
@@ -97,6 +96,10 @@ function buildMeters(){
       <div class="delta num" id="c-${r.key}">–<small>kWh</small></div>
     </div>`).join("");
   $("meters").addEventListener("input", updateDeltas);
+  $("adjusts").innerHTML = PEOPLE.map((p,i)=>`
+    <div><label for="a-${p}"><span class="dot" style="background:${COLORS[i]};display:inline-block;margin-right:6px;vertical-align:-1px"></span>${p}</label>
+    <input type="text" inputmode="text" id="a-${p}" placeholder="0" autocomplete="off"></div>`).join("");
+  $("adjusts").addEventListener("input", updateAdjTotal);
 }
 function updateDeltas(){
   ["main"].concat(PEOPLE).forEach(k=>{
@@ -109,6 +112,12 @@ function updateDeltas(){
     } else { el.innerHTML = "–<small>kWh</small>"; el.style.color=""; }
   });
 }
+function updateAdjTotal(){
+  const t = PEOPLE.reduce((s,p)=>{ const v = parseNum($("a-"+p).value); return s + (isFinite(v)?v:0); },0);
+  const el = $("adjTotal");
+  el.textContent = "Total des ajustements : " + fmtAr.format(t) + " Ar" + (Math.abs(t) >= 0.5 ? " (doit faire 0)" : "");
+  el.style.color = Math.abs(t) >= 0.5 ? "var(--danger)" : "";
+}
 function previousMonth(id){
   return Object.keys(months).filter(k=>k<id).sort().pop();
 }
@@ -119,6 +128,7 @@ function fillForm(id){
     setv("d-main",m.main.debut); setv("f-main",m.main.fin);
     PEOPLE.forEach(p=>{ setv("d-"+p,m.subs[p].debut); setv("f-"+p,m.subs[p].fin); });
     setv("billAmount",m.bill.amount); setv("billKwh",m.bill.kwh);
+    PEOPLE.forEach(p=>{ const a = m.adjust && m.adjust[p]; $("a-"+p).value = a ? String(a).replace(".",",") : ""; });
     document.querySelector(`input[name=method][value="${m.method}"]`).checked = true;
     $("balance").checked = !!m.balance;
     $("entryHint").textContent = "Ce mois est déjà enregistré. Modifiez les valeurs puis enregistrez à nouveau.";
@@ -127,6 +137,7 @@ function fillForm(id){
     const prev = months[previousMonth(id)];
     ["main"].concat(PEOPLE).forEach(k=>{ $("d-"+k).value=""; $("f-"+k).value=""; });
     $("billAmount").value=""; $("billKwh").value="";
+    PEOPLE.forEach(p=>$("a-"+p).value="");
     if (prev){
       setv("d-main",prev.main.fin);
       PEOPLE.forEach(p=>setv("d-"+p,prev.subs[p].fin));
@@ -141,6 +152,7 @@ function fillForm(id){
   document.querySelectorAll("#view-entry input.bad").forEach(i=>i.classList.remove("bad"));
   $("errors").textContent = "";
   updateDeltas();
+  updateAdjTotal();
 }
 function readForm(){
   const errs = [];
@@ -165,10 +177,19 @@ function readForm(){
   const amount = read("billAmount","Montant de la facture");
   const kwh = read("billKwh","kWh facturés");
   if (isFinite(kwh) && kwh === 0){ $("billKwh").classList.add("bad"); errs.push("kWh facturés : la valeur doit être supérieure à 0."); }
+  const adjust = {}; let adjSum = 0;
+  PEOPLE.forEach(p=>{
+    const raw = $("a-"+p).value.trim();
+    if (raw === "") return;
+    const v = parseNum(raw);
+    if (!isFinite(v)){ $("a-"+p).classList.add("bad"); errs.push(`Ajustement de ${p} : saisissez un nombre valide.`); return; }
+    if (v !== 0){ adjust[p] = v; adjSum += v; }
+  });
+  if (Math.abs(adjSum) >= 0.5) errs.push(`Ajustements : le total doit faire 0 Ar (actuellement ${fmtAr.format(adjSum)} Ar).`);
   const method = document.querySelector("input[name=method]:checked").value;
   const prevPaid = months[id] && months[id].paid;
   const paid = {}; PEOPLE.forEach(p=>paid[p] = !!(prevPaid && prevPaid[p]));
-  return {errs, doc:{id, main, subs, bill:{amount, kwh}, method, balance:$("balance").checked, paid, updatedAt:new Date().toISOString()}};
+  return {errs, doc:{id, main, subs, bill:{amount, kwh}, adjust, method, balance:$("balance").checked, paid, updatedAt:new Date().toISOString()}};
 }
 
 /* ---------- Résultats ---------- */
@@ -201,7 +222,7 @@ function renderResults(){
 
   const rows = PEOPLE.map((p,i)=>{
     const share = r.shares[i];
-    const detail = (m.method==="none" || share===0 || TRANSFERS[p]) ? "" :
+    const detail = (m.method==="none" || share===0 || (m.adjust && m.adjust[p])) ? "" :
       `${fmtKwh.format(r.subs[i])} ${share>=0?"+":"−"} ${fmtKwh.format(Math.abs(share))} d'écart`;
     const paid = m.paid && m.paid[p];
     return `<tr>
