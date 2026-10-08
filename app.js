@@ -27,8 +27,10 @@ function currentMonthId(){
   return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");
 }
 
-/* ---------- Stockage (localStorage du navigateur) ---------- */
+/* ---------- Stockage : Supabase (partagé) + cache localStorage ---------- */
 let months = {};          // id -> doc
+let sb = null;            // client Supabase, si configuré
+const TABLE = "mois";
 function loadLocal(){
   try { const raw = localStorage.getItem(LS_KEY); months = raw ? JSON.parse(raw) : {}; }
   catch(e){ months = {}; }
@@ -36,13 +38,66 @@ function loadLocal(){
 function saveLocal(){
   try { localStorage.setItem(LS_KEY, JSON.stringify(months)); } catch(e){}
 }
+function setSync(text, bad){
+  const el = $("syncState"); el.textContent = text; el.style.color = bad ? "var(--danger)" : "";
+}
 async function persist(doc){
   months[doc.id] = doc;
   saveLocal();
+  if (sb){
+    const { error } = await sb.from(TABLE).upsert({ id: doc.id, data: doc, updated_at: new Date().toISOString() });
+    if (error){ setSync("Erreur de synchronisation — enregistré sur cet appareil", true); toast("Non synchronisé : " + error.message); }
+    else setSync("Synchronisé — historique partagé");
+  }
 }
 async function removeMonth(id){
   delete months[id];
   saveLocal();
+  if (sb){
+    const { error } = await sb.from(TABLE).delete().eq("id", id);
+    if (error) toast("Suppression non synchronisée : " + error.message);
+  }
+}
+async function loadRemote(){
+  const { data, error } = await sb.from(TABLE).select("id, data");
+  if (error) throw error;
+  const next = {};
+  data.forEach(row => { next[row.id] = row.data; });
+  return next;
+}
+async function connectRemote(){
+  const cfg = window.SUPABASE_CONFIG;
+  if (!cfg || !cfg.url || !cfg.anonKey || cfg.url.includes("VOTRE")) return;
+  if (!window.supabase){ setSync("Bibliothèque Supabase non chargée — enregistré sur cet appareil", true); return; }
+  try {
+    sb = window.supabase.createClient(cfg.url, cfg.anonKey);
+    setSync("Connexion à la base…");
+    const remote = await loadRemote();
+    // Envoie une seule fois les mois présents uniquement sur cet appareil
+    const missing = Object.keys(months).filter(id => !remote[id]);
+    if (missing.length){
+      const { error } = await sb.from(TABLE).upsert(missing.map(id => ({ id, data: months[id], updated_at: new Date().toISOString() })));
+      if (!error) missing.forEach(id => { remote[id] = months[id]; });
+    }
+    months = remote; saveLocal();
+    setSync("Synchronisé — historique partagé");
+    // Mises à jour en direct quand quelqu'un d'autre enregistre
+    sb.channel("mois-live")
+      .on("postgres_changes", { event: "*", schema: "public", table: TABLE }, payload => {
+        if (payload.eventType === "DELETE"){ delete months[payload.old.id]; }
+        else { months[payload.new.id] = payload.new.data; }
+        saveLocal(); refreshAll();
+      })
+      .subscribe();
+    // Rafraîchit aussi au retour sur l'onglet
+    document.addEventListener("visibilitychange", async () => {
+      if (document.visibilityState !== "visible") return;
+      try { months = await loadRemote(); saveLocal(); refreshAll(); } catch(e){}
+    });
+  } catch(e){
+    sb = null;
+    setSync("Base injoignable — enregistré sur cet appareil", true);
+  }
 }
 
 /* ---------- Calcul ---------- */
@@ -369,4 +424,9 @@ loadLocal();
 buildMeters();
 $("month").value = currentMonthId();
 fillForm($("month").value);
+connectRemote().then(() => {
+  // Recharge le formulaire si rien n'a encore été saisi
+  if (!$("f-main").value) fillForm($("month").value);
+  refreshAll();
+});
 })();
